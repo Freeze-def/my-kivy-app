@@ -15,12 +15,12 @@ android.minapi = 21
 android.ndk = 25c
 android.sdk = 33
 
-# Use release branch instead of master
-p4a.branch = release-2024.12.1
+# Use develop branch (stable and maintained)
+p4a.branch = develop
 p4a.requirements = python3,kivy,android
 
 # Architecture
-android.archs = armeabi-v7a,arm64-v8a
+android.archs = arm64-v8a
 
 # Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
