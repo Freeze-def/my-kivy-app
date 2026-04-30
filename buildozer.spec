@@ -5,7 +5,7 @@ package.domain = org.test
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas
 version = 0.1
-requirements = python3,kivy
+requirements = python3==3.11,kivy
 orientation = portrait
 fullscreen = 0
 
@@ -17,7 +17,7 @@ android.sdk = 33
 
 # Use develop branch (stable and maintained)
 p4a.branch = develop
-p4a.requirements = python3,kivy,android
+p4a.requirements = python3==3.11,kivy,android
 
 # Architecture
 android.archs = arm64-v8a
