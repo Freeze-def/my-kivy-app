@@ -10,23 +10,23 @@ orientation = portrait
 fullscreen = 0
 
 # Android configuration
-android.api = 31
+android.api = 33
 android.minapi = 21
 android.ndk = 25c
 android.sdk = 33
 
-# Required for AIDL compilation
-android.accept_sdk_license = True
-android.arch = armeabi-v7a
-android.gradle_dependencies = 
-android.add_src = 
-
-# Python for Android
-p4a.branch = develop
+# Use release branch instead of master
+p4a.branch = release-2024.12.1
 p4a.requirements = python3,kivy,android
+
+# Architecture
+android.archs = armeabi-v7a,arm64-v8a
 
 # Permissions
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
+
+# Build configuration
+android.accept_sdk_license = True
 
 [buildozer]
 log_level = 2
