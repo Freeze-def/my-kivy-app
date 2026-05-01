@@ -46,8 +46,8 @@ jobs:
           pip install buildozer==1.5.0 cython==3.0.11 setuptools==69.0.0
 
       - name: Cache Buildozer artifacts
-        uses: actions/cache@v4
-        with:          path: |
+        uses: actions/cache@v4          
+        path: |
             ~/.buildozer/android/packages
             .buildozer/android/platform/build-arm64-v8a/build
             .buildozer/android/platform/build-arm64-v8a/.gradle
