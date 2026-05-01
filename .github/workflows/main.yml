@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # ← КЛЮЧЕВОЕ: 22.04 стабильнее для p4a
 
     steps:
       - name: Checkout code
@@ -34,7 +34,8 @@ jobs:
             openjdk-17-jdk \
             zip \
             unzip \
-            git
+            git \
+            wget
 
       - name: Set JAVA_HOME
         run: echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
@@ -42,14 +43,12 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          # Обновлённые версии для совместимости
           pip install buildozer==1.5.0 cython==3.0.11 setuptools==69.0.0
 
       - name: Setup Android SDK licenses
         run: |
           mkdir -p $ANDROID_HOME/licenses          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-preview-license
 
       - name: Install Android SDK components
         run: |
@@ -65,27 +64,29 @@ jobs:
       - name: Build APK
         run: |
           set -o pipefail
-          # Очищаем кэш перед сборкой (избегаем конфликтов версий)
+          
+          # Очищаем кэш, чтобы избежать конфликтов
           rm -rf .buildozer/android/platform/build-arm64-v8a/.gradle
           
+          # Запускаем сборку
           buildozer -v android debug 2>&1 | tee build.log
           
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ BUILD FAILED — tail of log:"
+            echo "❌ BUILD FAILED — last 150 lines:"
             tail -n 150 build.log
             exit 1
           fi
           
-          # Поиск APK
+          # Поиск и копирование APK
           APK_PATH=$(find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -name "*-debug.apk" -type f 2>/dev/null | head -n1)
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" apk_output/mykivyapp-debug.apk
             echo "✓ APK copied: $APK_PATH"
           else
-            echo "⚠ Searching alternative paths..."
+            echo "⚠ Trying alternative paths..."
             find .buildozer -name "*.apk" -type f -exec cp {} apk_output/ \; 2>/dev/null || true
             if [ -z "$(ls -A apk_output/ 2>/dev/null)" ]; then
-              echo "❌ No APK found after build"
+              echo "❌ No APK found"
               exit 1
             fi
           fi
@@ -95,8 +96,8 @@ jobs:
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
           GRADLE_OPTS: "-Xmx2048m -Dorg.gradle.daemon=false"
-
-      - name: Upload APK artifact        if: success()
+      - name: Upload APK artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: mykivyapp-apk
