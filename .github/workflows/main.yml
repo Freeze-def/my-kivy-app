@@ -45,10 +45,9 @@ jobs:
           pip install --upgrade pip
           pip install buildozer==1.5.0 cython==3.0.11 setuptools==69.0.0
 
-      # 🔥 КЭШ: Сохраняем скачанные пакеты и скомпилированные рецепты
       - name: Cache Buildozer artifacts
-        uses: actions/cache@v4        with:
-          path: |
+        uses: actions/cache@v4
+        with:          path: |
             ~/.buildozer/android/packages
             .buildozer/android/platform/build-arm64-v8a/build
             .buildozer/android/platform/build-arm64-v8a/.gradle
@@ -63,7 +62,7 @@ jobs:
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
 
-      - name: Install Android SDK components (skip if exists)
+      - name: Install Android SDK components
         run: |
           if [ ! -d "$ANDROID_HOME/platforms/android-33" ]; then
             $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
@@ -72,7 +71,7 @@ jobs:
               "platform-tools" \
               "ndk;25.2.9519653"
           else
-            echo "✅ SDK/NDK already installed, skipping download"
+            echo "SDK already installed"
           fi
 
       - name: Create APK output directory
@@ -82,57 +81,31 @@ jobs:
         id: build_step
         run: |
           set -o pipefail
-          
-          echo "🔨 Starting INCREMENTAL build..."
+          echo "Starting build..."
           buildozer -v android debug 2>&1 | tee build.log
           
           BUILD_STATUS=${PIPESTATUS[0]}
           if [ $BUILD_STATUS -ne 0 ]; then
-            echo "❌ Build failed with exit code $BUILD_STATUS"
-            tail -n 200 build.log
+            echo "Build failed"
+            tail -n 100 build.log
             exit 1
           fi
           
-          echo "✅ Build completed. Searching for APK..."
+          echo "Searching for APK..."
+          find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -type f -name "*.apk" -exec cp {} apk_output/ \; 2>/dev/null || true
+          find .buildozer -type f -name "mykivyapp*.apk" -exec cp {} apk_output/ \; 2>/dev/null || true
           
-          # === ПОИСК 1: Стандартный путь ===
-          find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -type f -name "*.apk" 2>/dev/null | while read apk; do            echo "  Found: $apk"
-            cp -v "$apk" apk_output/
-          done
-          
-          # === ПОИСК 2: Альтернативный путь ===
-          find .buildozer -type f -name "mykivyapp*.apk" 2>/dev/null | while read apk; do
-            echo "  Found: $apk"
-            cp -v "$apk" apk_output/
-          done
-          
-          # === ПОИСК 3: Любой APK ===
-          find .buildozer -type f -name "*.apk" 2>/dev/null | grep -v "unaligned\|unsigned" | while read apk; do
-            echo "  Found: $apk"
-            cp -v "$apk" apk_output/
-          done
-          
-          # === ФИНАЛЬНАЯ ПРОВЕРКА ===
           APK_COUNT=$(find apk_output -name "*.apk" -type f 2>/dev/null | wc -l)
-          if [ "$APK_COUNT" -eq 0 ]; then
-            echo "❌ CRITICAL: No APK files found"
-            find .buildozer -name "*.apk" -type f 2>/dev/null || echo "  None"
+          if [ "$APK_COUNT" -eq 0 ]; then            echo "No APK found"
             exit 1
           fi
-          
-          echo "✅ Successfully copied $APK_COUNT APK file(s)"
+          echo "Success: $APK_COUNT APKs copied"
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
           GRADLE_OPTS: "-Xmx2048m -Dorg.gradle.daemon=false"
-
-      - name: Debug: List build outputs
-        if: always()
-        run: |
-          echo "📁 Dist structure:"
-          find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp -maxdepth 3 -type d 2>/dev/null | head -10 || echo "  (not found)"
 
       - name: Upload APK artifact
         if: success()
@@ -141,11 +114,10 @@ jobs:
           name: mykivyapp-apk
           path: apk_output/*.apk
           retention-days: 30
-          compression-level: 6
-          if-no-files-found: warn
 
       - name: Upload build logs
-        if: always()        uses: actions/upload-artifact@v4
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: build-logs
           path: |
