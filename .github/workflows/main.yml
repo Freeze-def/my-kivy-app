@@ -3,6 +3,9 @@ name: Build Android APK
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:  # ← Ручной запуск для тестов
 
 jobs:
   build:
@@ -19,7 +22,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y \
             build-essential \
             libffi-dev \
@@ -28,7 +31,9 @@ jobs:
             automake \
             libtool \
             pkg-config \
-            openjdk-17-jdk
+            openjdk-17-jdk \
+            zip \
+            unzip
 
       - name: Set JAVA_HOME
         run: echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
@@ -42,32 +47,61 @@ jobs:
         run: |
           mkdir -p $ANDROID_HOME/licenses
           echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
-          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-preview-license
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-preview-license
 
       - name: Install Android SDK components
         run: |
-          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install "platforms;android-33" "build-tools;33.0.0"
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
+            "platforms;android-33" \
+            "build-tools;33.0.0" \
+            "platform-tools"
+
+      - name: Create APK output directory
+        run: mkdir -p apk_output
 
       - name: Build APK
         run: |
+          # Запускаем сборку с логированием
           buildozer android debug 2>&1 | tee build.log
+          
+          # Ищем APK в стандартных путях python-for-android
+          APK_PATH=$(find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -name "*-debug.apk" -type f 2>/dev/null | head -n1)
+          
+          if [ -n "$APK_PATH" ]; then
+            cp "$APK_PATH" apk_output/mykivyapp-debug.apk
+            echo "✓ APK successfully copied: $APK_PATH"
+          else
+            # Пробуем альтернативный путь (старые версии p4a)
+            ALT_PATH=$(find .buildozer -name "mykivyapp*-debug.apk" -type f 2>/dev/null | head -n1)
+            if [ -n "$ALT_PATH" ]; then
+              cp "$ALT_PATH" apk_output/mykivyapp-debug.apk
+              echo "✓ APK found (alternative path): $ALT_PATH"
+            else
+              echo "⚠ APK not found in expected locations. Listing all .apk files:"
+              find .buildozer -name "*.apk" -type f 2>/dev/null || echo "No APK files found at all"
+              exit 1
+            fi
+          fi
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
 
-      - name: Upload APK
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: bin/*.apk
-
-      - name: Upload build logs on failure
-        if: failure()
+          name: mykivyapp-apk
+          path: apk_output/*.apk
+          retention-days: 30
+          compression-level: 6
+      - name: Upload build logs (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: build-logs
-          path: build.log
+          path: |
+            build.log
+            .buildozer/android/platform/build-arm64-v8a/dist_info.txt
+          retention-days: 7
