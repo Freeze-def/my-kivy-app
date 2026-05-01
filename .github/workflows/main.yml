@@ -5,7 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:  # ← Ручной запуск для тестов
+  workflow_dispatch:
 
 jobs:
   build:
@@ -33,7 +33,8 @@ jobs:
             pkg-config \
             openjdk-17-jdk \
             zip \
-            unzip
+            unzip \
+            git
 
       - name: Set JAVA_HOME
         run: echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
@@ -41,44 +42,50 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install --upgrade pip
-          pip install buildozer cython==0.29.36 setuptools==69.0.0
+          # Обновлённые версии для совместимости
+          pip install buildozer==1.5.0 cython==3.0.11 setuptools==69.0.0
 
       - name: Setup Android SDK licenses
         run: |
-          mkdir -p $ANDROID_HOME/licenses
-          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
-          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-preview-license
+          mkdir -p $ANDROID_HOME/licenses          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
+          echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-preview-license
 
       - name: Install Android SDK components
         run: |
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --install \
             "platforms;android-33" \
             "build-tools;33.0.0" \
-            "platform-tools"
+            "platform-tools" \
+            "ndk;25.2.9519653"
 
       - name: Create APK output directory
         run: mkdir -p apk_output
 
       - name: Build APK
         run: |
-          # Запускаем сборку с логированием
-          buildozer android debug 2>&1 | tee build.log
+          set -o pipefail
+          # Очищаем кэш перед сборкой (избегаем конфликтов версий)
+          rm -rf .buildozer/android/platform/build-arm64-v8a/.gradle
           
-          # Ищем APK в стандартных путях python-for-android
+          buildozer -v android debug 2>&1 | tee build.log
+          
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "❌ BUILD FAILED — tail of log:"
+            tail -n 150 build.log
+            exit 1
+          fi
+          
+          # Поиск APK
           APK_PATH=$(find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -name "*-debug.apk" -type f 2>/dev/null | head -n1)
-          
           if [ -n "$APK_PATH" ]; then
             cp "$APK_PATH" apk_output/mykivyapp-debug.apk
-            echo "✓ APK successfully copied: $APK_PATH"
+            echo "✓ APK copied: $APK_PATH"
           else
-            # Пробуем альтернативный путь (старые версии p4a)
-            ALT_PATH=$(find .buildozer -name "mykivyapp*-debug.apk" -type f 2>/dev/null | head -n1)
-            if [ -n "$ALT_PATH" ]; then
-              cp "$ALT_PATH" apk_output/mykivyapp-debug.apk
-              echo "✓ APK found (alternative path): $ALT_PATH"
-            else
-              echo "⚠ APK not found in expected locations. Listing all .apk files:"
-              find .buildozer -name "*.apk" -type f 2>/dev/null || echo "No APK files found at all"
+            echo "⚠ Searching alternative paths..."
+            find .buildozer -name "*.apk" -type f -exec cp {} apk_output/ \; 2>/dev/null || true
+            if [ -z "$(ls -A apk_output/ 2>/dev/null)" ]; then
+              echo "❌ No APK found after build"
               exit 1
             fi
           fi
@@ -87,16 +94,16 @@ jobs:
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
+          GRADLE_OPTS: "-Xmx2048m -Dorg.gradle.daemon=false"
 
-      - name: Upload APK artifact
-        if: success()
+      - name: Upload APK artifact        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: mykivyapp-apk
           path: apk_output/*.apk
           retention-days: 30
-          compression-level: 6
-      - name: Upload build logs (always)
+
+      - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
