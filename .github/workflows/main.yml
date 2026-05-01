@@ -5,11 +5,11 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
-  workflow_dispatch:  # Ручной запуск для тестов
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # ← Важно: 22.04 стабильнее для python-for-android
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout code
@@ -35,7 +35,8 @@ jobs:
             zip \
             unzip \
             git \
-            wget
+            wget \
+            tree
 
       - name: Set JAVA_HOME
         run: echo "JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64" >> $GITHUB_ENV
@@ -46,8 +47,8 @@ jobs:
           pip install buildozer==1.5.0 cython==3.0.11 setuptools==69.0.0
 
       - name: Setup Android SDK licenses
-        run: |
-          mkdir -p $ANDROID_HOME/licenses          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
+        run: |          mkdir -p $ANDROID_HOME/licenses
+          echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" > $ANDROID_HOME/licenses/android-sdk-license
           echo "d56f5187479451eabf01fb78af6dfcb131a6481e" >> $ANDROID_HOME/licenses/android-sdk-license
 
       - name: Install Android SDK components
@@ -62,47 +63,79 @@ jobs:
         run: mkdir -p apk_output
 
       - name: Build APK
+        id: build_step
         run: |
           set -o pipefail
           
-          # Очищаем Gradle-кэш для избежания конфликтов
+          echo "🧹 Cleaning old Gradle cache..."
           rm -rf .buildozer/android/platform/build-arm64-v8a/.gradle
           
-          # Запускаем сборку с логированием
+          echo "🔨 Starting build..."
           buildozer -v android debug 2>&1 | tee build.log
           
-          # Проверяем результат сборки
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "❌ BUILD FAILED — последние 150 строк лога:"
-            tail -n 150 build.log
+          BUILD_STATUS=${PIPESTATUS[0]}
+          if [ $BUILD_STATUS -ne 0 ]; then
+            echo "❌ Build failed with exit code $BUILD_STATUS"
+            tail -n 200 build.log
             exit 1
           fi
           
-          # Поиск APK в стандартном пути python-for-android
-          echo "🔍 Searching for APK..."
-          APK_PATH=$(find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -name "*-debug.apk" -type f 2>/dev/null | head -n1)
+          echo "✅ Build completed. Searching for APK..."
           
-          if [ -n "$APK_PATH" ]; then
-            cp "$APK_PATH" apk_output/mykivyapp-debug.apk
-            echo "✓ APK successfully copied: $APK_PATH"
-          else
-            # Альтернативный поиск (для старых версий p4a)
-            echo "⚠ Trying alternative paths..."
-            find .buildozer -name "mykivyapp*-debug.apk" -type f 2>/dev/null | head -n1 | xargs -I {} cp {} apk_output/ 2>/dev/null || true
-            
-            if [ -z "$(ls -A apk_output/ 2>/dev/null)" ]; then
-              echo "❌ No APK found after build. Available .apk files:"
-              find .buildozer -name "*.apk" -type f 2>/dev/null || echo "None found"
-              exit 1
-            else
-              echo "✓ APK found via alternative path"
-            fi          fi
+          # === ПОИСК 1: Стандартный путь для p4a 2024+ ===
+          echo "🔍 Search 1: Standard p4a path..."
+          find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp/build/outputs/apk -type f -name "*.apk" 2>/dev/null | while read apk; do
+            echo "  Found: $apk"
+            cp -v "$apk" apk_output/
+          done
+          
+          # === ПОИСК 2: Альтернативный путь (старые версии) ===
+          echo "🔍 Search 2: Alternative paths..."
+          find .buildozer -type f -name "mykivyapp*.apk" 2>/dev/null | while read apk; do
+            echo "  Found: $apk"
+            cp -v "$apk" apk_output/
+          done
+          
+          # === ПОИСК 3: Любой APK в build ===          echo "🔍 Search 3: Any APK in build tree..."
+          find .buildozer -type f -name "*.apk" 2>/dev/null | grep -v "unaligned\|unsigned" | while read apk; do
+            echo "  Found: $apk"
+            cp -v "$apk" apk_output/
+          done
+          
+          # === ФИНАЛЬНАЯ ПРОВЕРКА ===
+          echo ""
+          echo "📦 Contents of apk_output/:"
+          ls -lah apk_output/ || echo "  (empty)"
+          
+          APK_COUNT=$(find apk_output -name "*.apk" -type f 2>/dev/null | wc -l)
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo ""
+            echo "❌ CRITICAL: No APK files copied to apk_output/"
+            echo ""
+            echo "🗂️ Full structure of dist folder:"
+            find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp -type f -name "*.apk" -o -name "build" 2>/dev/null | head -30
+            echo ""
+            echo "🔎 All .apk files in .buildozer:"
+            find .buildozer -name "*.apk" -type f 2>/dev/null || echo "  None found"
+            exit 1
+          fi
+          
+          echo "✅ Successfully copied $APK_COUNT APK file(s)"
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
           LC_ALL: C.UTF-8
           LANG: C.UTF-8
           GRADLE_OPTS: "-Xmx2048m -Dorg.gradle.daemon=false"
+
+      - name: Debug: List build outputs (always run)
+        if: always()
+        run: |
+          echo "📁 Build directory structure:"
+          find .buildozer/android/platform/build-arm64-v8a/dists/mykivyapp -type d 2>/dev/null | head -20 || echo "  (not found)"
+          echo ""
+          echo "📄 All APK-related files:"
+          find .buildozer -iname "*apk*" -type f 2>/dev/null | head -20 || echo "  (none)"
 
       - name: Upload APK artifact
         if: success()
@@ -112,6 +145,7 @@ jobs:
           path: apk_output/*.apk
           retention-days: 30
           compression-level: 6
+          # Важно: не падать, если файлов нет (для отладки)          if-no-files-found: warn
 
       - name: Upload build logs (always)
         if: always()
